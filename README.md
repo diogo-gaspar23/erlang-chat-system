@@ -45,7 +45,14 @@
 
 ## How to run it
 
-There is a Emakefile for compiling the source code files using the following command:
+There is a Emakefile for compiling the source code files.
+First create a new directory called ebin inside the project root directory:
+
+```
+mkdir ebin
+```
+
+Then, use the following command to compile the files.
 
 ```
 erl -make
@@ -55,4 +62,16 @@ This will compile the files and keep them inside the ebin directory. To run the 
 
 ```
 erl -pa ebin/ -sname node_name
+```
+
+To start a new Router Node use the following command in the erlang shell:
+
+```
+router_monitor:start().
+```
+
+To start a new Client Node use the following command in the erlang shell:
+
+```
+client:start(my_name, 'router_node@MY_PC').
 ```
