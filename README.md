@@ -1,2 +1,58 @@
-# erlang-chat-system
-This is an fault-tolerant chat-system made in Erlang
+# TheyChat!
+
+## Behaviours
+
+### Router Node
+
+#### Router
+
+- Starts and monitors Servers
+- Sends available Servers
+- Router restores Servers when they go down
+    - It first tries the Node where the Server was
+    - If Node is not available, it starts the Server in another Node (includes starting the server in its own node if needed)
+- Router stores state backups for the Servers
+- Restarts Router Monitor in case of failure
+
+#### Router Monitor
+
+- Starts and creates link to Router
+- Stores state backup for Router
+- Restarts Router in case of failure
+
+### Server Node
+
+#### Server Chat
+
+- Allows clients to join server
+- Allows clients to leave server
+- Monitors clients and removes clients when they go down
+
+#### Server Monitor
+
+- Starts and links to Server Chat
+- Stores state backup for linked Server Chat
+- Restarts linked Server Chat when it goes down
+
+### Client Node
+
+#### Client
+
+- Interacts with the router to maintain a list of the available servers
+- Joins a server (Can only join one server at a time)
+- Leaves a server (Will leave current server to enter another one)
+- Sends a message to the server
+
+## How to run it
+
+There is a Emakefile for compiling the source code files using the following command:
+
+```
+erl -make
+```
+
+This will compile the files and keep them inside the ebin directory. To run the compiled code use the following command:
+
+```
+erl -pa ebin/ -sname node_name
+```
