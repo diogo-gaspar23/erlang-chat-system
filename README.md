@@ -66,7 +66,7 @@ erl -pa ebin/ -sname node_name
 
 To start a new Router Node use the following command in the erlang shell:
 
-```
+```erlang
 router_monitor:start().
 ```
 
@@ -78,6 +78,6 @@ router ! {self(), make_ref(), {add_server, server_topic, 'mynode@MYPC'}}.
 
 To start a new Client Node use the following command in the erlang shell:
 
-```
-client:start(my_name, 'router_node@MY_PC').
+```erlang
+client:start(my_name, 'mynode@MYPC').
 ```
