@@ -1,7 +1,7 @@
 -module(router).
 -export([init/2, start/1, start_link/2, terminate/0]).
 -record(state, {chat_servers, % List of {MonitorPid, ServerName, ServerPid, RemoteMachine, State}
-                remote_machines}).
+                remote_machines}). % List of Nodes
 
 ping_remote(RemoteMachine) ->
     net_adm:ping(RemoteMachine).
@@ -171,6 +171,8 @@ add_remote_machine(RemoteMachine, [RemoteMachine|T], Acc) ->
 
 add_remote_machine(RemoteMachine, [H|T], Acc) ->
     add_remote_machine(RemoteMachine, T, [H|Acc]).
+
+% --------- Remove remote machines if they are not available ------------
 
 updateRemotes(RemoteMachines) ->
     updateRemotes(RemoteMachines, []).
