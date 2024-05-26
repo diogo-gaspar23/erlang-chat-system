@@ -70,6 +70,12 @@ To start a new Router Node use the following command in the erlang shell:
 router_monitor:start().
 ```
 
+In order to create a server, send the following message to the Router:
+
+```erlang
+router ! {self(), make_ref(), {add_server, server_topic, 'mynode@MYPC'}}.
+```
+
 To start a new Client Node use the following command in the erlang shell:
 
 ```
