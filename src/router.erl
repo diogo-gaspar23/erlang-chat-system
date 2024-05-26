@@ -14,17 +14,18 @@ start_link(RouterMonitor, State) ->
     Pid.
  
 terminate() ->
-    ?MODULE ! shutdown.
+    exit(whereis(?MODULE), shutdown).
 
 init(RouterMonitor, PrevState = #state{}) ->
+    process_flag(trap_exit, true),
     UpdatedRemoteMachines = updateRemotes(PrevState#state.remote_machines),
     UpdatedState = monitor_state(PrevState#state{remote_machines=UpdatedRemoteMachines}),
     loop(RouterMonitor, UpdatedState).
 
 loop(RouterMonitor, S = #state{}) ->
     receive
-        {From, MsgRef, {add_server, Name, RemoteMachine}} ->
-            NewState = handle_new_server(From, MsgRef, S, RemoteMachine, Name),
+        {From, MsgRef, {add_server, ServerName, RemoteMachine}} ->
+            NewState = handle_new_server(From, MsgRef, S, RemoteMachine, ServerName),
             RouterMonitor ! {self(), state_change, NewState},
             loop(RouterMonitor, NewState);
         {From, MsgRef, get_chat_servers} ->
@@ -35,7 +36,11 @@ loop(RouterMonitor, S = #state{}) ->
             NewState = S#state{chat_servers=NewChatServers},
             RouterMonitor ! {self(), state_change, NewState},
             loop(RouterMonitor, NewState);
-        shutdown ->
+        {'EXIT', RouterMonitor, Reason} ->
+            io:format("Process ~p exited for reason ~p~n",[RouterMonitor,Reason]),
+            NewRouterMonitor = router_monitor:restart_monitor(self(), S),
+            loop(NewRouterMonitor, S);
+        {'EXIT', _From, shutdown} ->
             exit(shutdown);
         {'DOWN', _Ref, process, Pid, Reason} ->
             io:format("Process ~p exited for reason ~p~n",[Pid,Reason]),
@@ -61,18 +66,18 @@ create_servers(ChatServers, RemoteMachines) ->
 create_servers([], _, Acc) ->
     Acc;
 
-create_servers([{MonitorPid, Name, Server, State}|T], RemoteMachines, Acc) ->
+create_servers([{MonitorPid, ServerName, RemoteMachine, State}|T], RemoteMachines, Acc) ->
     Ref = erlang:monitor(process, MonitorPid),
     receive
         {'DOWN', Ref, process, MonitorPid, noproc} ->
-            case restore_server(Name, Server, State, RemoteMachines) of
+            case restore_server(ServerName, State, RemoteMachine, RemoteMachines) of
                 no_remote -> 
                     create_servers(T, RemoteMachines, Acc);
                 ChatServer -> 
                     create_servers(T, RemoteMachines, [ChatServer|Acc])
             end
     after 10 ->
-        create_servers(T, RemoteMachines, [{MonitorPid, Name, Server, State}|Acc])
+        create_servers(T, RemoteMachines, [{MonitorPid, ServerName, RemoteMachine, State}|Acc])
     end.
 
 % ------------- Get the available chat servers ----------------
@@ -92,8 +97,8 @@ handle_down_server(Pid, ChatServers, RemoteMachines) ->
 handle_down_server(_, [], _, Acc) ->
     Acc;
 
-handle_down_server(Pid, [{Pid,Name,RemoteMachine, State}|T], RemoteMachines, Acc) ->
-    case restore_server(Name, State, RemoteMachine, RemoteMachines) of
+handle_down_server(Pid, [{Pid,ServerName,RemoteMachine, State}|T], RemoteMachines, Acc) ->
+    case restore_server(ServerName, State, RemoteMachine, RemoteMachines) of
         no_remote -> 
             T ++ Acc;
         ChatServer -> 
@@ -103,22 +108,22 @@ handle_down_server(Pid, [{Pid,Name,RemoteMachine, State}|T], RemoteMachines, Acc
 handle_down_server(Pid, [H|T], RemoteMachines, Acc) ->
     handle_down_server(Pid, T, RemoteMachines, [H|Acc]).
 
-restore_server(Name, State, RemoteMachine, []) ->
+restore_server(ServerName, State, RemoteMachine, []) ->
     case ping_remote(RemoteMachine) of
         pong ->
-            {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, Name, State),
-            {NewMonitorPid, Name, RemoteMachine, State};
+            {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, ServerName, State),
+            {NewMonitorPid, ServerName, RemoteMachine, State};
         pang ->
             no_remote
     end;
 
-restore_server(Name, State, RemoteMachine, [H|T]) ->
+restore_server(ServerName, State, RemoteMachine, [H|T]) ->
     case ping_remote(RemoteMachine) of
         pong ->
-            {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, Name, State),
-            {NewMonitorPid, Name, RemoteMachine, State};
+            {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, ServerName, State),
+            {NewMonitorPid, ServerName, RemoteMachine, State};
         pang ->
-            restore_server(Name, State, H, T)
+            restore_server(ServerName, State, H, T)
     end.
 
 % ---------------- Handle Server State Change ------------------
@@ -128,24 +133,24 @@ handle_server_state_change(MonitorPid, State, ChatServers) ->
 handle_server_state_change(_, _, [], Acc) ->
     Acc;
 
-handle_server_state_change(MonitorPid, State, [{MonitorPid,Name,RemoteMachine,_OldState}|T], Acc) ->
-    [{MonitorPid,Name,RemoteMachine,State}|T] ++ Acc;
+handle_server_state_change(MonitorPid, State, [{MonitorPid,ServerName,RemoteMachine,_OldState}|T], Acc) ->
+    [{MonitorPid,ServerName,RemoteMachine,State}|T] ++ Acc;
 
 handle_server_state_change(MonitorPid, State, [H|T], Acc) ->
     handle_server_state_change(MonitorPid, State, T, [H|Acc]).
 
 % ------------- Handle creation of a new server ----------------
-handle_new_server(From, MsgRef, S, RemoteMachine, Name) ->
+handle_new_server(From, MsgRef, S, RemoteMachine, ServerName) ->
     case ping_remote(RemoteMachine) of
         pong ->
             NewRemoteMachines = add_remote_machine(RemoteMachine, S#state.remote_machines),
-            case server_exists(Name, S#state.chat_servers) of
+            case server_exists(ServerName, S#state.chat_servers) of
                 true ->
                     From ! {MsgRef, server_already_exists},
                     S#state{remote_machines=NewRemoteMachines};
                 false ->
-                    {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, Name, []),
-                    NewChatServers = [{NewMonitorPid, Name, RemoteMachine, []}|S#state.chat_servers],
+                    {NewMonitorPid, _} = server_monitor:start_monitor({?MODULE, node()}, RemoteMachine, ServerName, []),
+                    NewChatServers = [{NewMonitorPid, ServerName, RemoteMachine, []}|S#state.chat_servers],
                     From ! {MsgRef, created_server},
                     S#state{chat_servers=NewChatServers, remote_machines=NewRemoteMachines}
             end;
@@ -185,8 +190,8 @@ updateRemotes([H|T], Acc) ->
 server_exists(_, []) ->
     false;
 
-server_exists(Name, [{_, Name, _, _, _}|_]) ->
+server_exists(ServerName, [{_, ServerName, _, _}|_]) ->
     true;
 
-server_exists(Name, [_|T]) ->
-    server_exists(Name, T).
+server_exists(ServerName, [_|T]) ->
+    server_exists(ServerName, T).

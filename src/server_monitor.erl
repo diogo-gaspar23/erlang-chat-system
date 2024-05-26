@@ -25,11 +25,11 @@ loop(Router, Name, Pid, State) ->
             loop(Router, Name, Pid, NewState);
         {'EXIT', _From, shutdown} ->
             exit(shutdown);
-        {'EXIT', Pid, Reason} ->
-            io:format("Process ~p exited for reason ~p~n",[Pid,Reason]),
-            restart(Router, Name, State)
+        {'EXIT', Pid, _Reason} ->
+            io:format("Chat server went down!\nRestarting...\n"),
+            NewPid = restart(Name, State),
+            loop(Router, Name, NewPid, State)
     end.
 
-restart(Router, Name, State) ->
-    Pid = server_chat:start_link(Name, self(), State),
-    loop(Router, Name, Pid, State).
+restart(Name, State) ->
+    server_chat:start_link(Name, self(), State).

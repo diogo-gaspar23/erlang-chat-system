@@ -30,7 +30,7 @@ loop(Servers, CurrServer, RouterRemote) ->
             io:format("~p: ~p~n", [From, Msg]),
             loop(Servers, CurrServer, RouterRemote);
         {get_available_servers} ->
-            {UpdatedCurrServer, NewServers} = get_available_servers_from_router(RouterRemote, Servers, CurrServer),
+            {UpdatedCurrServer, NewServers} = get_and_print_available_servers_from_router(RouterRemote, Servers, CurrServer),
             loop(NewServers, UpdatedCurrServer, RouterRemote);
         {send, Message} when CurrServer =/= {} ->
             {UpdatedCurrServer, NewServers} = get_available_servers_from_router(RouterRemote, Servers, CurrServer),
@@ -40,7 +40,7 @@ loop(Servers, CurrServer, RouterRemote) ->
             end,
             loop(NewServers, UpdatedCurrServer, RouterRemote);
         {send, _Message} ->
-            io:format("You are not in any server."),
+            io:format("You are not in any server.\n"),
             loop(Servers, CurrServer, RouterRemote);
         {join_server, Name} when CurrServer =:= {} ->
             {_, NewServers} = get_available_servers_from_router(RouterRemote, Servers, CurrServer),
@@ -48,23 +48,53 @@ loop(Servers, CurrServer, RouterRemote) ->
             loop(NewServers, Server, RouterRemote);
         {join_server, Name} ->
             {UpdatedCurrServer, NewServers} = get_available_servers_from_router(RouterRemote, Servers, CurrServer),
-            leave_server(UpdatedCurrServer),
-            Server = join_new_server(Name, NewServers),
+            {CurrServerName, _} = UpdatedCurrServer,
+            Server = if
+                CurrServerName =/= Name -> 
+                    leave_server(UpdatedCurrServer),
+                    join_new_server(Name, NewServers);
+                true ->
+                    io:format("Already in that server\n"),
+                    UpdatedCurrServer
+            end,
             loop(Servers, Server, RouterRemote);
         {leave_server} when CurrServer =/= {} ->
             {UpdatedCurrServer, NewServers} = get_available_servers_from_router(RouterRemote, Servers, CurrServer),
             leave_server(UpdatedCurrServer),
             loop(NewServers, {}, RouterRemote);
         {leave_server} ->
-            io:format("You are not in a server."),
+            io:format("You are not in a server.\n"),
             loop(Servers, CurrServer, RouterRemote);
         {swap_remote, NewRouterRemote} ->
-            loop(Servers, CurrServer, NewRouterRemote);
+            case add_remote(NewRouterRemote) of
+                pong ->
+                    loop(Servers, CurrServer, NewRouterRemote);
+                pang ->
+                    io:format("Router Node not found. Keeping previous.\n"),
+                    loop(Servers, CurrServer, RouterRemote)
+            end;
         {stop_client} ->
-            io:format("Client exiting...")
+            io:format("Client exiting...\n")
     end.
 
 get_available_servers_from_router(RouterRemote, Servers, CurrServer) ->
+    {router, RouterRemote} ! {self(), Ref = make_ref(), get_chat_servers},
+        receive
+            {Ref, NewServers} ->
+                UpdatedCurrServer = if
+                    CurrServer =/= {} -> 
+                        {CurrName, _} = CurrServer,
+                        get_server(CurrName, NewServers);
+                    true ->
+                        CurrServer
+                end,
+                {UpdatedCurrServer, NewServers}
+        after 1000 ->
+            io:format("Router did not respond.\n"),
+            {CurrServer, Servers}
+        end.
+
+get_and_print_available_servers_from_router(RouterRemote, Servers, CurrServer) ->
     {router, RouterRemote} ! {self(), Ref = make_ref(), get_chat_servers},
         receive
             {Ref, NewServers} ->
@@ -78,14 +108,14 @@ get_available_servers_from_router(RouterRemote, Servers, CurrServer) ->
                 end,
                 {UpdatedCurrServer, NewServers}
         after 1000 ->
-            io:format("Router did not respond."),
+            io:format("Router did not respond.\n"),
             {CurrServer, Servers}
         end.
 
 join_new_server(Name, Servers) ->
     case get_server(Name, Servers) of
         not_found -> 
-            io:format("Server does not exist."),
+            io:format("Server does not exist.\n"),
             {};
         Server -> 
             Server ! {self(), Ref = make_ref(), join_server},
@@ -94,7 +124,7 @@ join_new_server(Name, Servers) ->
                     io:format("Received from server: ~p~n",[Reply]),
                     Server
             after 1000 ->
-                io:format("Server did not respond."),
+                io:format("Server did not respond.\n"),
                 {}
             end
     end.
@@ -104,7 +134,7 @@ leave_server(Server) ->
     receive
         {Ref, Reply} -> io:format("Received from server: ~p~n",[Reply])
     after 1000 ->
-            io:format("Server did not respond.")
+            io:format("Server did not respond.\n")
     end.
 
 get_server(_, []) ->
